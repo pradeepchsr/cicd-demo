@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW 2: RELEASE  →  TST  →  STG  →  PRD
+#
+# WHEN:  Someone creates a version tag on main, e.g. v1.0.0
+# WHAT:  1. Test + BUILD ONCE (package the app, stamped with the version).
+#        2. Deploy that SAME package to TST.
+#        3. Wait for approval → deploy the SAME package to STG.
+#        4. Wait for approval → deploy the SAME package to PRD.
+#
+# WHERE DO APPROVALS COME FROM?
+#   Each deploy job says  environment: tst / stg / prd.
+#   In GitHub → Settings → Environments you add "Required reviewers" to stg and prd.
+#   GitHub then pauses the run at that job until a reviewer clicks Approve.
+#
+# WHERE DO PER-ENVIRONMENT SETTINGS COME FROM?
+#   Settings → Environments → <env> → Variables → APP_MESSAGE
+#   A job only sees the variables of the environment it names.
+# ─────────────────────────────────────────────────────────────────────────────
+name: 2 - Release (TST → STG → PRD)
+
+on:
+  push:
+    tags: ["v*"]                      # any tag starting with v: v1.0.0, v1.0.1, ...
+
+jobs:
+  # ── Step 1: test and build the package ONCE ────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest -v
+
+      - name: Build the package
+        run: |
+          mkdir package
+          cp app.py package/
+          echo "${{ github.ref_name }}" > package/VERSION     # e.g. v1.0.0
+          echo "Built package for version ${{ github.ref_name }}"
+
+      - name: Save the package (so later jobs deploy exactly this)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-package
+          path: package/
+
+  # ── Step 2: deploy to TST ──────────────────────────────────────────────────
+  deploy-tst:
+    needs: build                      # only after build succeeded
+    runs-on: ubuntu-latest
+    environment: tst                  # uses the 'tst' environment (no approval configured)
+    steps:
+      - name: Get the package built in step 1 (NOT a new build)
+        uses: actions/download-artifact@v4
+        with:
+          name: app-package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deploy to TST (simulated)
+        env:
+          APP_ENV: tst
+          APP_MESSAGE: ${{ vars.APP_MESSAGE }}   # comes from Settings → Environments → tst
+        run: |
+          export APP_VERSION=$(cat VERSION)
+          python app.py
+
+  # ── Step 3: deploy to STG (pauses for approval) ────────────────────────────
+  deploy-stg:
+    needs: deploy-tst                 # only after TST succeeded
+    runs-on: ubuntu-latest
+    environment: stg                  # ⏸ pauses here if stg has required reviewers
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deploy to STG (simulated)
+        env:
+          APP_ENV: stg
+          APP_MESSAGE: ${{ vars.APP_MESSAGE }}   # comes from Settings → Environments → stg
+        run: |
+          export APP_VERSION=$(cat VERSION)
+          python app.py
+
+  # ── Step 4: deploy to PRD (pauses for approval) ────────────────────────────
+  deploy-prd:
+    needs: deploy-stg                 # only after STG succeeded
+    runs-on: ubuntu-latest
+    environment: prd                  # ⏸ pauses here if prd has required reviewers
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deploy to PRD (simulated)
+        env:
+          APP_ENV: prd
+          APP_MESSAGE: ${{ vars.APP_MESSAGE }}   # comes from Settings → Environments → prd
+        run: |
+          export APP_VERSION=$(cat VERSION)
+          python app.py

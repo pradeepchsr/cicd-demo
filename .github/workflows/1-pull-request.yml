@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW 1: PULL REQUEST  →  DEV
+#
+# WHEN:  A developer opens (or updates) a pull request into main.
+# WHAT:  1. Run the tests.
+#        2. If tests pass, "deploy" to DEV (here: run the app with APP_ENV=dev).
+# RESULT: A green ✅ or red ❌ check on the pull request.
+#         With branch protection, a red ❌ means the PR cannot be merged.
+# ─────────────────────────────────────────────────────────────────────────────
+name: 1 - Pull Request (DEV)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Job 1: run the unit tests ──────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest            # GitHub gives us a fresh Linux machine
+    steps:
+      - name: Download the code from the PR branch
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: python -m unittest -v    # if any test fails, this job fails and the PR goes red
+
+  # ── Job 2: deploy to DEV (only runs if Job 1 passed) ───────────────────────
+  deploy-dev:
+    needs: test                       # "needs" = wait for 'test' and only run if it passed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Deploy to DEV (simulated)
+        env:
+          APP_ENV: dev
+          APP_VERSION: pr-${{ github.event.pull_request.number }}
+        run: |
+          echo "Pretend we are deploying PR #${{ github.event.pull_request.number }} to DEV..."
+          python app.py
